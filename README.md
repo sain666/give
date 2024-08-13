@@ -7,7 +7,7 @@ This is a project which implement functional versions of give and autotest. It i
 The give commands will store information. It implement by creating a directory in the current directory named .give and creating files with it as needed.
 `give-add` command creates a new Give assignment.
 `give-submit` makes a submission for the assignment by a student.
-`give-summary` lists all assignments. with a count of count of how many students have made submissions.
+`give-summary` lists all assignments. with a count of how many students have made submissions.
 `give-status` lists all submissions a student has made.
 `give-fetch` outputs the contents of a submission the student has made.
 `give-autotest` runs the autotests for an assignment on a program.
