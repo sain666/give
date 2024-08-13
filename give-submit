@@ -1,0 +1,71 @@
+#!/bin/dash
+# This script handles the submission of student assignments.
+# It takes three arguments: <assignment> <zid> <filename>.
+# It validates the inputs, ensures the necessary directories exist, and copies the submission to the appropriate location.
+
+# Check if the .give directory exists.
+if test ! -e ".give"; then
+    echo "give-submit: give directory .give not found" >&2
+    exit 1
+fi
+
+# Check if the number of arguments is exactly 3.
+if test "$#" != 3; then
+    echo "usage: give-submit <assignment> <zid> <filename>" >&2
+    exit 1
+fi
+
+# Validate the assignment name format.
+if echo "$1" | grep -vq "^[a-z][a-zA-Z0-9_]*$" ; then
+    echo "give-submit: invalid assignment: $1" >&2
+    exit 1
+fi
+
+# Validate the zid (student ID) format.
+if echo "$2" | grep -vqE "^z[0-9]{7}$" ; then
+    echo "give-submit: invalid zid: $2" >&2
+    exit 1
+fi
+
+# Validate the filename format.
+if echo "$3" | grep -vq "^[a-zA-Z0-9_][a-zA-Z0-9_]*" ; then
+    echo "give-submit: invalid filename: $3" >&2
+    exit 1
+fi
+
+# Check if the specified assignment directory exists.
+if test ! -e ".give/.reference/$1"; then
+    echo "give-submit: assignment $1 not found" >&2
+    exit 1
+fi
+
+# Check if the specified file exists.
+if test ! -e "$3"; then
+    echo "give-submit: $3: No such file or directory" >&2
+    exit 1
+fi
+
+# Check if the student directory for the assignment exists.
+# If not, create the student directory and set the submission number to 1, otherwise, get the next submission number.
+if test ! -e ".give/.reference/$1/$2"; then
+    mkdir .give/.reference/"$1"/"$2"
+    submission=1
+else
+    submission=$(ls -d .give/.reference/"$1"/"$2"/* | cut -d'/' -f5 | sort -n | tail -n 1)
+    submission=$(($submission + 1))
+fi
+
+# Create a new directory for the current submission and copy the file to the submission directory.
+mkdir .give/.reference/"$1"/"$2"/"$submission"
+cp "$3" .give/.reference/"$1"/"$2"/"$submission"/"$3"
+chmod u+x .give/.reference/"$1"/"$2"/"$submission"/"$3"
+
+# Get the current date and time then save the timestamp to a file in the submission directory.
+current_time=$(date +"%a %b %d %H:%M:%S %Y")
+echo "$current_time" > .give/.reference/"$1"/"$2"/$submission/_TIMESTAMP
+chmod 644 .give/.reference/"$1"/"$2"/$submission/_TIMESTAMP
+
+# Calculate the size of the submitted file.
+size=$(wc -c "$3" | cut -d' ' -f1)
+# Print a message indicating that the submission was accepted.
+echo "Submission accepted - submission $submission: $3 $size bytes @ $current_time"

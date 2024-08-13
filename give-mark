@@ -1,0 +1,177 @@
+#!/bin/dash
+# This script is used to automatically mark student submissions for a given assignment.
+# It takes one argument: <assignment>.
+# It validates the input, checks for the necessary files, and compares the student's output against the reference solution.
+
+# Check if the number of arguments is exactly 1.
+if test "$#" != 1; then
+    echo "usage: give-mark <assignment>" >&2
+    exit 1 
+fi
+
+# Validate the first argument as a valid assignment name.
+if echo "$1" | grep -vqE "^[a-z][a-zA-Z0-9_]*$" ; then
+    echo "give-mark: invalid assignment: $1" >&2
+    exit 1
+fi
+
+# Check if the assignment directory exists in the .give/.reference directory.
+if ! test -e ".give/.reference/$1"; then 
+    echo "give-mark: assignment $1 not found" >&2
+    exit 1
+fi
+
+# Loop through each student directory in the assignment directory.
+for student in .give/.reference/$1/*; do
+    # Extract the student ID (zid) from the directory path.
+    student=$(echo "$student" | grep -E "z[0-9]{7}" | cut -d'/' -f4)
+
+    if [ "$student" != "" ]; then
+        # Get the detail of students' last submission.
+        last_submission=$(ls -d .give/.reference/$1/$student/* | cut -d'/' -f5 | sort -n | tail -1)
+        student_file=$(ls -l .give/.reference/$1/$student/$last_submission/* | grep -E "^-rwxr" | rev | cut -d' ' -f1 | rev | cut -d'/' -f6)
+        size=$(wc -c .give/.reference/$1/$student/$last_submission/$student_file | cut -d' ' -f1)
+        time=$(cat .give/.reference/$1/$student/$last_submission/_TIMESTAMP)
+
+        # Print submission details.
+        echo "*** Student $student - submission $last_submission: $student_file $size bytes @ $time"
+
+        passed=0
+        failed=0
+        student_mark=0
+        full_mark=0
+
+        # Create a temporary file to store the automarking tests.
+        temp_file=$(mktemp)
+        cat -v .give/.reference/$1/_AUTOMARKING | grep -E "^." > "$temp_file"
+
+        # Loop through each test case in the automarking file.
+        while read line
+        do
+            # Extract test case details.
+            name=$(echo "$line" | sed -E "s/^([^|]*)\|.*$|/\1/")
+            argv=$(echo "$line" | sed -E "s/^[^|]*\|([^|]*).*$|/\1/")
+            input=$(echo "$line" | sed -E 's/^[^|]*\|[^|]*\|([^|]*).*$|/\1/')
+            option=$(echo "$line" | sed -E 's/^[^|]*\|[^|]*\|[^|]*\|([^|]*).*$|/\1/')
+            mark=$(echo "$line" | sed -E 's/^[^|]*\|[^|]*\|[^|]*\|[^|]*\|([^|]*).*$|/\1/')
+
+            # Prepare the input for the student's program.
+            input=$(echo "$input" | sed 's/n/\\n/g')
+            echo "$input" | ./.give/.reference/$1/$student/$last_submission/$student_file $argv > /tmp/stu.txt 2> /tmp/stu_err.txt
+            stu_err=$?
+            stu_err_out=$(cat /tmp/stu_err.txt)
+
+            echo "$input" | ./.give/.reference/$1/_SOLUTION/* $argv > /tmp/sample.txt 2> /tmp/sam_err.txt
+            sam_err=$?
+            sam_err_out=$(cat /tmp/sam_err.txt)
+            full_mark=$(($full_mark + $mark))
+            stu_err_size=$(wc -c /tmp/stu_err.txt | cut -d' ' -f1)
+            sam_err_size=$(wc -c /tmp/sam_err.txt| cut -d' ' -f1)
+            # Ignore empty lines.
+            if echo "$option" | grep -qE "b" ; then
+                sed '/^$/d' /tmp/stu.txt > /tmp/stu.txt
+                sed '/^$/d' /tmp/sample.txt > /tmp/sample.txt
+            fi
+            
+            # Ignore case differences.
+            if echo "$option" | grep -qE "c" ; then
+                tr A-Z a-z < /tmp/stu.txt > /tmp/stu.txt
+                tr A-Z a-z < /tmp/sample.txt > /tmp/sample.txt
+            fi
+
+            # Ignore all differences except for numbers and newlines.
+            if echo "$option" | grep -qE "d" ; then
+                tr -cd '0-9\n' < /tmp/stu.txt > /tmp/stu.txt
+                tr -cd '0-9\n' < /tmp/sample.txt > /tmp/sample.txt
+            fi
+
+            # Ignore differences between spaces and tabs.
+            if echo "$option" | grep -qE "w" ; then
+                tr '\t' ' ' < /tmp/stu.txt > /tmp/stu.txt
+                tr '\t' ' ' < /tmp/sample.txt > /tmp/sample.txt
+            fi
+
+            # Compare the student's output with the reference solution.
+            diff /tmp/stu.txt /tmp/sample.txt > /tmp/diff.txt
+
+            # Check the result of the diff command.
+            if [ $? -eq 0 ] && [ $stu_err -eq $sam_err ]; then
+                echo "* Test $name passed ($mark marks)."
+                student_mark=$((student_mark + mark))
+                passed=$((passed + 1))
+            else
+                # If the result is different then specified the case.
+                echo "* Test $name failed."
+                failed=$((failed + 1))
+                student_ans_size=$(wc -c /tmp/stu.txt | cut -d' ' -f1)
+                sample_ans_size=$(wc -c /tmp/sample.txt | cut -d' ' -f1)
+
+                stu_ans_line=$(wc -l /tmp/stu.txt | cut -d' ' -f1)
+                sam_ans_line=$(wc -l /tmp/sample.txt | cut -d' ' -f1)
+                # If no output expected.
+                if [ $sample_ans_size -eq 0 ]; then
+                    echo "--- No stdout expected, these $student_ans_size bytes produced:"
+                    cat /tmp/stu.txt
+                    echo ""
+                
+                # If no output produced.
+                elif [ $student_ans_size -eq 0 ]; then
+                    echo "--- No stdout produced, these $sample_ans_size bytes expected:"
+                    cat /tmp/sample.txt
+                    echo ""
+                # If there is a extra newline
+                elif [ $sample_ans_size -eq $((student_ans_size - 1)) ] && [ $sam_ans_line -eq $((stu_ans_line - 1)) ]; then
+                    echo "Extra newline at end of stdout"
+                    if [ $sam_err_size -eq $((stu_err_size - 1)) ]; then
+                        echo "Extra newline at end of stderr"
+                    fi
+                # If there is a missing newline
+                elif [ $sample_ans_size -eq $(($student_ans_size + 1)) ] && [ $sam_ans_line -eq $((stu_ans_line + 1)) ]; then
+                    echo "Missing newline at end of stdout"
+                    if [ $sam_err_size -eq $(($stu_err_size + 1)) ]; then
+                        echo "Missing newline at end of stderr"
+                    fi
+            
+                elif [ $sam_err != $stu_err ] || [ $stu_err_out != $sam_err_out ] && [ -n "$sam_err_out" ] && [ -n "$stu_err_out" ]; then
+                    if diff /tmp/stu.txt /tmp/sample.txt >/dev/null; then
+                        :
+                    else
+                        echo "--- Incorrect stdout of $student_ans_size bytes:"
+                        cat /tmp/stu.txt
+                        echo ""
+                        echo "--- Correct stdout is these $sample_ans_size bytes:"
+                        cat /tmp/sample.txt
+                        echo ""
+                    fi
+                    if [ $stu_err_out != $sam_err_out ]; then
+                        echo "--- Incorrect stderr of $stu_err_size bytes:"
+                        echo "$stu_err_out"
+                        echo ""
+                        echo "--- Correct stderr is these $sam_err_size bytes:"
+                        echo "$sam_err_out"
+                        echo ""
+                    fi
+
+                else
+                    echo "--- Incorrect stdout of $student_ans_size bytes:"
+                    cat /tmp/stu.txt
+                    echo ""
+
+                    echo "--- Correct stdout is these $sample_ans_size bytes:"
+                    cat /tmp/sample.txt
+                    echo ""
+                fi
+                if [ $stu_err !=  $sam_err ]; then
+                    echo "Exit status of $stu_err incorrect should be $sam_err"
+                fi
+            fi
+        done < "$temp_file"
+
+        # Print a summary of the test results.
+        if [ $full_mark -eq 0 ]; then
+            echo "No automarking"
+        else
+            echo "** $passed tests passed, $failed tests failed - mark: $student_mark/$full_mark"
+        fi
+    fi
+done

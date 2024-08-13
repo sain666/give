@@ -1,0 +1,184 @@
+#!/bin/dash
+# This script is used to run and validate autotests for a specified assignment.
+# It takes two arguments: <assignment> and <filename>.
+# It validates the input, checks the necessary files, and compares the outputs of the student's solution with the reference solution.
+#
+
+# Check if the number of arguments is exactly 2.
+if test "$#" != 2; then
+    echo "usage: give-autotest <assignment> <filename>" >&2
+    exit 1 
+fi
+
+# Validate the first argument as a valid assignment name.
+if echo "$1" | grep -vqE "^[a-z][a-zA-Z0-9_]*$" ; then
+    echo "give-autotest: invalid assignment: $1" >&2
+    exit 1
+fi
+
+# Validate the second argument as a valid filename.
+if echo "$2" | grep -vqE "^[a-zA-Z0-9\._/-]*$" ; then
+    echo "give-autotest: invalid filename: $2" >&2
+    exit 1
+fi
+
+# Check if the specified file exists.
+if ! test -e "$2"; then 
+    echo "give-autotest: $2 not found" >&2
+    exit 1
+fi
+
+# Check if the specified file is executable.
+if ! test -x "$2"; then
+    echo "$2 is not executable" >&2
+    exit 1
+fi
+
+# Check if the assignment directory exists in the .give/.reference directory.
+if ! test -e .give/.reference/"$1"; then
+    echo "give-autotest: assignment $1 not found" >&2
+    exit 1
+fi
+
+# Count the number of lines in the _AUTOTESTS file for the assignment.
+testcase=$(wc -l .give/.reference/"$1"/_AUTOTESTS | cut -d' ' -f1)
+
+# Check if there are no autotests.
+if [ "$testcase" -eq 0 ]; then
+    echo "No autotests"
+    exit 1
+fi
+
+# Remove comment lines from the _AUTOTESTS file and store the result in a temporary file.
+sed '/^#/d' < .give/.reference/"$1"/_AUTOTESTS > /tmp/_AUTOTESTS
+
+# Initialize counters for passed and failed tests.
+passed=0
+failed=0
+
+# Create a temporary file to store the cleaned autotest cases.
+temp_file=$(mktemp)
+cat -v /tmp/_AUTOTESTS | grep -E "^." > "$temp_file"
+
+# Read each line from the temporary file and process the autotests.
+while read line
+do
+    name=$(echo "$line" | sed -E "s/^([^|]*)\|.*$|/\1/")
+    argv=$(echo "$line" | sed -E "s/^[^|]*\|([^|]*).*$|/\1/")
+    input=$(echo "$line" | sed -E 's/^[^|]*\|[^|]*\|([^|]*).*$|/\1/')
+    option=$(echo "$line" | sed -E 's/^[^|]*\|[^|]*\|[^|]*\|([^|]*).*$|/\1/')
+
+    # Create 2 files to store the result of the correct answer and student answer seperately.
+    input=$(echo "$input" | sed 's/n/\\n/g')
+    echo "$input" | ./"$2" $argv > /tmp/stu.txt 2> /tmp/stu_err.txt
+    stu_err=$?
+    stu_err_out=$(cat /tmp/stu_err.txt)
+
+    echo "$input" | ./.give/.reference/"$1"/_SOLUTION/* $argv > /tmp/sample.txt 2> /tmp/sam_err.txt
+    sam_err=$?
+    sam_err_out=$(cat /tmp/sam_err.txt)
+
+
+    # Remove empty lines if the 'b' option is specified.
+    if echo "$option" | grep -qE "b" ; then
+        sed '/^$/d' /tmp/stu.txt > /tmp/stu.txt
+        sed '/^$/d' /tmp/sample.txt > /tmp/sample.txt
+    fi
+    
+    # Ignore case differences if the 'c' option is specified.
+    if echo "$option" | grep -qE "c" ; then
+        tr A-Z a-z < /tmp/stu.txt > /tmp/stu.txt
+        tr A-Z a-z < /tmp/sample.txt > /tmp/sample.txt
+    fi
+
+    # Remove all characters except digits and newlines if the 'd' option is specified.
+    if echo "$option" | grep -qE "d" ; then
+        tr -cd '0-9\n' < /tmp/stu.txt > /tmp/stu.txt
+        tr -cd '0-9\n' < /tmp/sample.txt > /tmp/sample.txt
+    fi
+
+    # Convert tabs to spaces if the 'w' option is specified.
+    if echo "$option" | grep -qE "w" ; then
+        tr '\t' ' ' < /tmp/stu.txt > /tmp/stu.txt
+        tr '\t' ' ' < /tmp/sample.txt > /tmp/sample.txt
+    fi
+
+
+    stu_err_size=$(wc -c /tmp/stu_err.txt | cut -d' ' -f1)
+    sam_err_size=$(wc -c /tmp/sam_err.txt| cut -d' ' -f1)
+
+    # Compare the student's output with the reference output.
+    diff /tmp/stu.txt /tmp/sample.txt > /tmp/diff.txt
+
+    # Check the result of the diff command.
+    if [ $? -eq 0 ] && [ $stu_err -eq $sam_err ]; then
+        echo "* Test $name passed."
+        passed=$((passed+1))
+    else
+        # If the result is different then specified the case.
+        echo "* Test $name failed."
+        failed=$((failed + 1))
+        student_ans_size=$(wc -c /tmp/stu.txt | cut -d' ' -f1)
+        sample_ans_size=$(wc -c /tmp/sample.txt | cut -d' ' -f1)
+        stu_ans_line=$(wc -l /tmp/stu.txt | cut -d' ' -f1)
+        sam_ans_line=$(wc -l /tmp/sample.txt | cut -d' ' -f1)
+        # If no output expected.
+        if [ "$sample_ans_size" -eq 0 ]; then
+            echo "--- No stdout expected, these $student_ans_size bytes produced:"
+            cat /tmp/stu.txt
+            echo ""
+
+        # If no output produced.
+        elif [ "$student_ans_size" -eq 0 ]; then
+            echo "--- No stdout produced, these $sample_ans_size bytes expected:"
+            cat /tmp/sample.txt
+            echo ""
+        # If there is a extra newline
+        elif [ "$sample_ans_size" -eq $(($student_ans_size - 1)) ] && [ $sam_ans_line -eq $((stu_ans_line - 1)) ]; then
+            echo "Extra newline at end of stdout"
+            if [ $sam_err_size -eq $(($stu_err_size - 1)) ]; then
+                echo "Extra newline at end of stderr"
+            fi
+        # If there is a missing newline
+        elif [ "$sample_ans_size" -eq $(($student_ans_size + 1)) ] && [ $sam_ans_line -eq $((stu_ans_line + 1)) ]; then
+            echo "Missing newline at end of stdout"
+            if [ $sam_err_size -eq $(($stu_err_size + 1)) ]; then
+                echo "Missing newline at end of stderr"
+            fi
+            
+        elif [ "$sam_err" != "$stu_err" ] || [ "$stu_err_out" != "$sam_err_out" ] && [ -n "$sam_err_out" ] && [ -n "$stu_err_out" ]; then
+            if diff /tmp/stu.txt /tmp/sample.txt >/dev/null; then
+                :
+            else
+                echo "--- Incorrect stdout of $student_ans_size bytes:"
+                cat /tmp/stu.txt
+                echo ""
+                echo "--- Correct stdout is these $sample_ans_size bytes:"
+                cat /tmp/sample.txt
+                echo ""
+            fi
+            if [ "$stu_err_out" != "$sam_err_out" ]; then
+                echo "--- Incorrect stderr of $stu_err_size bytes:"
+                echo "$stu_err_out"
+                echo ""
+                echo "--- Correct stderr is these $sam_err_size bytes:"
+                echo "$sam_err_out"
+                echo ""
+            fi
+        else
+            echo "--- Incorrect stdout of $student_ans_size bytes:"
+            cat /tmp/stu.txt
+            echo ""
+            echo "--- Correct stdout is these $sample_ans_size bytes:"
+            cat /tmp/sample.txt
+            echo ""
+        fi
+
+        if [ $stu_err !=  $sam_err ]; then
+            echo "Exit status of $stu_err incorrect should be $sam_err"
+        fi
+    fi
+done < "$temp_file"
+
+# Print a summary of the test results.
+echo "** $passed tests passed, $failed tests failed"

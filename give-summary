@@ -1,0 +1,28 @@
+#!/bin/dash
+# This script provides a summary of assignments and their submissions.
+# It checks if any assignments exist and counts the number of submissions for each.
+
+# Check if .give directory exist.
+if ! test -e .give; then 
+    echo "give-summary: give directory .give not found" >&2
+    exit 1
+fi
+# Check if the number of arguments is not 0.
+if test "$#" != 0; then
+    echo "usage: give-summary" >&2
+    exit 1
+# Check if there are no assignments found in the .give directory.
+elif [ $(find .give/.reference/* 2>/dev/null | wc -l) -eq 0 ] ; then
+    echo "no assignments"
+else
+    # Iterate through each assignment directory found in .give/.reference/.
+    for file in .give/.reference/*; do
+        # Extract the assignment name from the directory path.
+        assignment=$(echo "$file" | cut -d'/' -f3)
+        # Count the number of student submissions for the current assignment.
+        count=$(ls -l .give/.reference/$assignment | grep "^d" | wc -l)
+        count=$(($count - 1))
+        # Print the assignment name and the number of submissions.
+        echo "assignment $assignment: submissions from $count students"
+    done
+fi

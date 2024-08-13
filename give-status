@@ -1,0 +1,44 @@
+#!/bin/dash
+# This script checks the submission status of a student identified by their zid.
+# It takes one argument: <zid>.
+# It validates the input and checks for the existence of submissions for the student.
+
+# Check if the number of arguments is exactly 1.
+if test "$#" != 1; then
+    echo "usage: give-status <zid>" >&2
+    exit 1
+fi
+
+# Validate the zid (student ID) format.
+if echo "$1" | grep -vqE "^z[0-9]{7}$"; then
+    echo "give-status: invalid zid: $1" >&2
+    exit 1
+fi
+
+submissions=0
+# Loop through each assignment directory.
+for file in .give/.reference/*; do
+    # Extract the assignment name.
+    assignment=$(echo "$file" | cut -d'/' -f3)
+
+    # Check if there are submissions for the given zid in the current assignment directory.
+    if test -e .give/.reference/"$assignment"/"$1"; then
+        # Print the number of submissions for the current assignment.
+        count=$(ls -l .give/.reference/"$assignment"/"$1" | grep '^d' | wc -l)
+        echo "* $count submissions for $assignment"
+        submissions=$(($submissions + 1))
+        # Loop through each submission folder and get the submission details for each directory.
+        for folder in $(seq 1 "$count"); do
+            time=$(cat .give/.reference/"$assignment"/"$1"/"$folder"/_TIMESTAMP)
+            name=$(ls -l .give/.reference/"$assignment"/"$1"/"$folder"/* | grep -E "^-rwxr" | rev | cut -d' ' -f1| rev | cut -d'/' -f6)
+            size=$(wc -c .give/.reference/"$assignment"/"$1"/"$folder"/"$name" | cut -d' ' -f1 )
+            echo "submission $folder: $name $size bytes @ $time"
+            folder=$(($folder + 1))
+        done
+    fi
+done
+
+# Check if there are any submissions for the given zid.
+if [ $submissions -eq 0 ]; then
+    echo "no submissions for $1"
+fi

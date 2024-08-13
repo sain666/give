@@ -1,0 +1,59 @@
+#!/bin/dash
+# This script is used to create an assignment directory structure in a .give directory.
+# It takes four arguments: <assignment>, <solution>, <autotests>, and <automarking>.
+# It validates the input, creates necessary directories, and copies the specified files
+# into the appropriate locations within the .give directory.
+
+# Check if the number of arguments is exactly 4.
+if test "$#" != 4; then
+    echo "usage: give-add <assignment> <solution> <autotests> <automarking>" >&2
+    exit 1 
+fi
+
+# Validate the first argument as a valid assignment name.
+if echo "$1" | grep -vq "^[a-z][a-zA-Z0-9_]*$" ; then
+    echo "give-add: invalid assignment: $1" >&2
+    exit 1
+fi
+
+# Validate the second argument as a valid solution name.
+if echo "$2" | grep -vq "^[a-zA-Z0-9_][a-zA-Z0-9_]*" ; then
+    echo "give-add: invalid solution: $2" >&2
+    exit 1
+fi
+
+# Check if the .give directory exists.
+# If not, create the .give directory and its .reference subdirectory.
+if test ! -e ".give"; then
+    mkdir .give
+    mkdir .give/.reference
+    echo "directory .give created"
+fi
+
+# Check if the .give/.reference/<assignment> directory exists, if it exists then print error message and exit.
+# If the assignment directory does not exist, create the directory with specified files.
+# If all files exist, create the assignment directory and its subdirectories, otherwise, print the error message and exit.
+if test ! -e ".give/.reference/$1"; then
+    if test ! -e "$2"; then
+        echo "give-add: $2: No such file or directory" >&2
+        exit 1
+    elif test ! -e "$3"; then 
+        echo "give-add: $3: No such file or directory" >&2
+        exit 1
+    elif test ! -e "$4"; then
+        echo "give-add: $4: No such file or directory" >&2
+        exit 1
+    else
+        mkdir .give/.reference/"$1"
+        mkdir .give/.reference/"$1"/_SOLUTION
+        cp "$2" .give/.reference/"$1"/_SOLUTION/"$2"
+        cp "$3" .give/.reference/"$1"/_AUTOTESTS
+        chmod 644 .give/.reference/"$1"/_AUTOTESTS
+        cp "$4" .give/.reference/"$1"/_AUTOMARKING
+        chmod 644 .give/.reference/"$1"/_AUTOMARKING
+        echo "assignment $1 created"
+    fi
+else
+    echo "give-add: assignment $1 already exists" >&2
+    exit 1
+fi

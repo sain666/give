@@ -1,0 +1,73 @@
+#!/bin/dash
+# This script is used to fetch and display the executable submission for a given assignment and student ID (zid).
+# It takes two or three arguments: <assignment>, <zid>, and optionally <n>.
+# It validates the input, checks for the necessary files, and displays the contents of the executable submission.
+
+# Check if the number of arguments is exactly 2 or 3.
+if test "$#" != 2 && test "$#" != 3; then
+    echo "usage: give-fetch <assignment> <zid> [n]" >&2
+    exit 1
+fi
+
+# Validate the first argument as a valid assignment name.
+if echo "$1" | grep -vqE "^[a-z][a-zA-Z0-9_]*$"; then
+    echo "give-fetch: invalid assignment: $1" >&2
+    exit 1
+fi
+
+# Validate the second argument as a valid zid.
+if echo "$2" | grep -vqE "^z[0-9]{7}$"; then
+    echo "give-fetch: invalid zid: $2" >&2
+    exit 1
+fi
+
+# Check if the assignment directory exists in the .give/.reference directory.
+if test ! -e ".give/.reference/$1"; then
+    echo "give-fetch: assignment $1 not found" >&2
+    exit 1
+fi
+
+# If the number of arguments is 2, then fetch the last submission.
+if test "$#" = 2; then
+    # Check whether the student's submission directory exists for the assignment.
+    if test ! -e ".give/.reference/$1/$2"; then
+        echo "give-fetch: submission None not found for $1" >&2
+        exit 1
+    fi
+
+    # Display the last one of the student's submission.
+    folder=$(ls -l .give/.reference/"$1"/"$2" | grep '^d' | wc -l)
+    file=$(find .give/.reference/"$1"/"$2"/"$folder"/* -type f -executable)
+    cat "$file"
+
+# If the number of arguments is 3.
+elif test "$#" = 3; then
+    # Count the number of directories in the student's submission directory.
+    num=$(ls -l .give/.reference/$1/$2/ | wc -l)
+    num=$(($num - 1))
+
+    # Validate the third argument as a valid submission number.
+    if ! echo "$3" | grep -vqE "^([1-9] | [1-9][0-9]* | -[1-9] | -[1-9][0-9]* )$"; then
+        echo "usage: give-fetch <assignment> <zid> [n]" >&2
+        exit 1
+    fi
+    
+    get_num=0
+
+    # Determine the submission number based on the third argument.
+    if [ $3 -le 0 ]; then
+        get_num=$(($num + $3))
+    else
+        get_num=$3
+    fi
+
+    # Check if the specified submission directory exists.
+    if test ! -e ".give/.reference/$1/$2/$get_num"; then
+        echo "give-fetch: submission $3 not found for $1" >&2
+        exit 1
+    fi
+
+    # Display the file in the specified submission directory.
+    file=$(find .give/.reference/"$1"/"$2"/"$get_num"/* -type f -executable)
+    cat "$file"
+fi

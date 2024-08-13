@@ -1,0 +1,26 @@
+#!/bin/dash
+# This script is used to remove an assignment and all its associated data.
+# It takes one argument: <assignment>.
+# It validates the input and checks for the existence of the assignment directory before removing it.
+
+# Check if the number of arguments is exactly 1.
+if test "$#" != 1; then
+    echo "usage: give-rm <assignment>" >&2
+    exit 1
+fi
+
+# Validate the first argument as a valid assignment name.
+if echo "$1" | grep -vq "^[a-z][a-zA-Z0-9_]*$" ; then
+    echo "give-rm: invalid assignment: $1" >&2
+    exit 1
+fi
+
+# Check if the assignment directory exists in the .give/.reference directory.
+if ! test -e ".give/.reference/$1"; then
+    echo "give-rm: assignment $1 not found" >&2
+    exit 1
+fi
+
+# Remove the assignment directory and print a confirmation message indicating the assignment has been removed.
+rm -r .give/.reference/$1
+echo "assignment $1 removed"
